@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const port = 5000;
+const port = 5000 || process.env.PORT;
 
 const app = express();
 require('dotenv').config();
@@ -14,18 +14,15 @@ const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology:
 // Verify Token
 function verifyJWT(req, res, next){
     const authHeader = req.headers.authorization;
-    console.log('authHeader', authHeader)
     if(!authHeader){
         res.status(401).send('Unauthorized access');
     }
 
     const token = authHeader.split(' ')[1];
 
-    console.log('token', token)
     jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
         if(err){
-            console.log('err', err)
-            res.status(403).send('Forbidden access on verify token');
+            res.status(403).send('Forbidden access');
         }
         req.decoded = decoded;
         next();
@@ -53,7 +50,7 @@ async function run() {
             };
 
             const result = await usersCollection.insertOne(newUser);
-            res.send(result);
+            res.send('User has been created');
         });
 
         // LOGIN
@@ -76,6 +73,42 @@ async function run() {
 
         });
 
+        // FORGOT PASSWORD
+        app.post('/forgot-password', async (req, res) => {
+            const email = req.body.email;
+            const user = await usersCollection.findOne({
+                email: email
+            });
+            if(user == null){
+                res.status(400).send('User does not exist');
+            }
+            else{
+                const token = jwt.sign({email}, process.env.RESET_TOKEN_SECRET, {expiresIn: '20m'});
+                res.send({resetToken: token});
+            }
+        });
+
+        // RESET PASSWORD
+        app.post('/reset-password', async (req, res) => {
+            const token = req.headers.token;
+            const password = req.body.newPassword;
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            if(token == null){
+                res.status(401).send('Unauthorized access');
+            }
+
+            jwt.verify(token, process.env.RESET_TOKEN_SECRET, async (err, decoded) => {
+                if(err){
+                    res.status(403).send('Forbidden access');
+                }
+                const email = decoded.email;
+                const result = await usersCollection.updateOne({email: email}, {$set: {password: hashedPassword}});
+                res.send('Password has been reset');
+            });
+        });
+
+
         // GET POSTS
         app.get('/posts', async (req, res) => {
             const postsCollection = client.db("atgTask2").collection("posts");
@@ -85,15 +118,10 @@ async function run() {
 
         // CREATE POST
         app.post('/posts', verifyJWT, async (req, res) => {
-            console.log('req.body', req.body)
             const newPost = req.body;
 
             const result = await postsCollection.insertOne(newPost);
-            console.log('result', result)
-            if(result.insertedCount > 0){
-                res.send(result);
-            }   
-            // res.send(result);
+            res.send('Post has been created');
         });
 
         // UPDATE POST
@@ -105,65 +133,65 @@ async function run() {
             };
 
             const result = await postsCollection.updateOne({_id: ObjectId(id)}, {$set: updatedPost});
-            console.log('result', result)
-            if(result.modifiedCount > 0){
-                res.send(result);
-            }
+            res.send('Post has been updated');
         });
 
         // DELETE POST
         app.delete('/posts/:id', verifyJWT, async (req, res) => {
             const id = req.params.id;
             const result = await postsCollection.deleteOne({_id: ObjectId(id)});
-            if(result.deletedCount > 0){
-                res.send(result);
-            }
+            res.send('Post has been deleted');
         });
 
         // ADD LIKE
-        app.put('/posts/:id/like', verifyJWT, async (req, res) => {
+        app.put('/posts/like/:id', verifyJWT, async (req, res) => {
             const id = req.params.id;
             const post = await postsCollection.findOne({_id: ObjectId(id)});
             const likes = parseInt(post.likes);
-
-            const updatedPost = {
-                likes: likes + 1,
-            };
-            
-            const result = await postsCollection.updateOne({_id: ObjectId(id)}, {$set: updatedPost}, {upsert: true});
-            if(result.modifiedCount > 0){
-                res.send(result);
+            if(!likes){
+                updatedPost = {
+                    likes: 1,
+                };    
+            } else{
+                updatedPost = {
+                    likes: likes + 1,
+                };
             }
+
+            const result = await postsCollection.updateOne({_id: ObjectId(id)}, {$set: updatedPost}, {upsert: true});
+            res.send('Post has been liked');
         });
 
         // ADD COMMENT
-        app.put('/posts/:id/comment', verifyJWT, async (req, res) => {
+        app.put('/posts/comment/:id', verifyJWT, async (req, res) => {
             const id = req.params.id;
 
             const post = await postsCollection.findOne({_id: ObjectId(id)});
             const comments = post.comments;
 
-            if(comments.length > 0){
-                
+            if(!comments){
+                updatedPost = {
+                    comments: [req.body.comment],
+                };
+            } else{
+                updatedPost = {
+                    comments: [...comments, req.body.comment],
+                };
             }
 
-            const addedComment = {
-                comments: req.body.comment,
-            };
-
-            const result = await postsCollection.updateOne({_id: ObjectId(id)}, {$push: addedComment}, {upsert: true});
-            res.send(result);
+            const result = await postsCollection.updateOne({_id: ObjectId(id)}, {$set: updatedPost}, {upsert: true});
+            res.send('Comment has been added');
         });
     }
-    finally{
-
+    catch(err){
+        console.log(err);
     }
 }
 
 run().catch(console.log);
 
 app.get('/', (req, res) => {
-  res.send('Hello World!');
+  res.send('Server is up');
 });
 
 app.listen(port, () => {
