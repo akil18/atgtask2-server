@@ -87,19 +87,12 @@ async function run() {
         app.post('/posts', verifyJWT, async (req, res) => {
             console.log('req.body', req.body)
             const newPost = req.body;
-            let result;
 
-            try{
-                result = await postsCollection.insertOne(newPost);
-                console.log('result', result)
-                
-            } catch(err){
-                console.log('err', err)
-            }
-            
+            const result = await postsCollection.insertOne(newPost);
+            console.log('result', result)
             if(result.insertedCount > 0){
                 res.send(result);
-            }
+            }   
             // res.send(result);
         });
 
